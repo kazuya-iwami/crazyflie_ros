@@ -25,6 +25,7 @@ public:
         : m_worldFrame(worldFrame)
         , m_frame(frame)
         , m_pubNav()
+        , m_pubDiff()
         , m_listener()
         , m_pidX(
             get(n, "PIDs/X/kp"),
@@ -69,10 +70,12 @@ public:
         , m_serviceLand()
         , m_thrust(0)
         , m_startZ(0)
+        ,m_count(0)
     {
         ros::NodeHandle nh;
-        m_listener.waitForTransform(m_worldFrame, m_frame, ros::Time(0), ros::Duration(10.0)); 
+        m_listener.waitForTransform(m_worldFrame, m_frame, ros::Time(0), ros::Duration(10.0));
         m_pubNav = nh.advertise<geometry_msgs::Twist>("cmd_vel", 1);
+        m_pubDiff = nh.advertise<geometry_msgs::Twist>("diff", 1);
         m_subscribeGoal = nh.subscribe("goal", 1, &Controller::goalChanged, this);
         m_serviceTakeoff = nh.advertiseService("takeoff", &Controller::takeoff, this);
         m_serviceLand = nh.advertiseService("land", &Controller::land, this);
@@ -145,9 +148,11 @@ private:
                 if (transform.getOrigin().z() > m_startZ + 0.05 || m_thrust > 50000)
                 {
                     pidReset();
-                    m_pidZ.setIntegral(m_thrust / m_pidZ.ki());
+                    m_pidZ.setIntegral((m_thrust-5000) / m_pidZ.ki());
                     m_state = Automatic;
                     m_thrust = 0;
+                    m_count = 0;
+                    ROS_INFO("auto!!");
                 }
                 else
                 {
@@ -165,6 +170,7 @@ private:
                 tf::StampedTransform transform;
                 m_listener.lookupTransform(m_worldFrame, m_frame, ros::Time(0), transform);
                 if (transform.getOrigin().z() <= m_startZ + 0.05) {
+                    ROS_ERROR("idle!!");
                     m_state = Idle;
                     geometry_msgs::Twist msg;
                     m_pubNav.publish(msg);
@@ -173,6 +179,11 @@ private:
             // intentional fall-thru
         case Automatic:
             {
+
+                if(m_state == Automatic && m_count++ > 2000){
+                  ROS_ERROR("land!!");
+                  m_state = Landing;
+                }
                 tf::StampedTransform transform;
                 m_listener.lookupTransform(m_worldFrame, m_frame, ros::Time(0), transform);
 
@@ -194,7 +205,7 @@ private:
                     )).getRPY(roll, pitch, yaw);
 
                 geometry_msgs::Twist msg;
-                msg.linear.x = m_pidX.update(0, targetDrone.pose.position.x);
+                msg.linear.x = m_pidX.update(0.0, targetDrone.pose.position.x);
                 msg.linear.y = m_pidY.update(0.0, targetDrone.pose.position.y);
                 msg.linear.z = m_pidZ.update(0.0, targetDrone.pose.position.z);
                 msg.angular.z = m_pidYaw.update(0.0, yaw);
@@ -205,8 +216,40 @@ private:
             break;
         case Idle:
             {
+                if(m_count++ < 300)
+                    break;
+
                 geometry_msgs::Twist msg;
                 m_pubNav.publish(msg);
+
+                tf::StampedTransform transform;
+                m_listener.lookupTransform(m_worldFrame, m_frame, ros::Time(0), transform);
+
+                geometry_msgs::PoseStamped targetWorld;
+                targetWorld.header.stamp = transform.stamp_;
+                targetWorld.header.frame_id = m_worldFrame;
+                targetWorld.pose = m_goal.pose;
+
+                // ROS_ERROR("%f,%f,%f",m_goal.pose.position.x,m_goal.pose.position.y,m_goal.pose.position.z);
+
+                geometry_msgs::PoseStamped targetDrone;
+                m_listener.transformPose(m_frame, targetWorld, targetDrone);
+
+                tfScalar roll, pitch, yaw;
+                tf::Matrix3x3(
+                    tf::Quaternion(
+                        targetDrone.pose.orientation.x,
+                        targetDrone.pose.orientation.y,
+                        targetDrone.pose.orientation.z,
+                        targetDrone.pose.orientation.w
+                    )).getRPY(roll, pitch, yaw);
+
+                geometry_msgs::Twist msg_diff;
+                msg_diff.linear.x = targetDrone.pose.position.x;
+                msg_diff.linear.y = targetDrone.pose.position.y;
+                msg_diff.linear.z = targetDrone.pose.position.z;
+                msg_diff.angular.z = yaw;
+                m_pubDiff.publish(msg_diff);
             }
             break;
         }
@@ -226,6 +269,7 @@ private:
     std::string m_worldFrame;
     std::string m_frame;
     ros::Publisher m_pubNav;
+    ros::Publisher m_pubDiff;
     tf::TransformListener m_listener;
     PID m_pidX;
     PID m_pidY;
@@ -238,6 +282,7 @@ private:
     ros::ServiceServer m_serviceLand;
     float m_thrust;
     float m_startZ;
+    int m_count;
 };
 
 int main(int argc, char **argv)
@@ -251,7 +296,7 @@ int main(int argc, char **argv)
   std::string frame;
   n.getParam("frame", frame);
   double frequency;
-  n.param("frequency", frequency, 50.0);
+  n.param("frequency", frequency, 100.0);
 
   Controller controller(worldFrame, frame, n);
   controller.run(frequency);
