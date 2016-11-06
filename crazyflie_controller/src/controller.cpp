@@ -156,7 +156,7 @@ private:
                 }
                 else
                 {
-                    m_thrust += 10000 * dt;
+                    m_thrust += 20000 * dt;
                     geometry_msgs::Twist msg;
                     msg.linear.z = m_thrust;
                     m_pubNav.publish(msg);
@@ -180,7 +180,7 @@ private:
         case Automatic:
             {
 
-                if(m_state == Automatic && m_count++ > 2000){
+                if(m_state == Automatic && m_count++ > 1800){
                   ROS_ERROR("land!!");
                   m_state = Landing;
                 }
@@ -210,6 +210,15 @@ private:
                 msg.linear.z = m_pidZ.update(0.0, targetDrone.pose.position.z);
                 msg.angular.z = m_pidYaw.update(0.0, yaw);
                 m_pubNav.publish(msg);
+
+                geometry_msgs::Twist msg_diff;
+                msg_diff.linear.x = targetDrone.pose.position.x;
+                msg_diff.linear.y = targetDrone.pose.position.y;
+                msg_diff.linear.z = targetDrone.pose.position.z;
+                msg_diff.angular.z = yaw;
+                m_pubDiff.publish(msg_diff);
+
+
 
 
             }
