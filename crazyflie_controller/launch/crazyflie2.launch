@@ -6,6 +6,7 @@
 
   <node name="controller" pkg="crazyflie_controller" type="crazyflie_controller" output="screen">
     <param name="frame" value="/Robot_1/base_link" />
+    <param name="pointer" value="/Robot_2/base_link" />
     <param name="worldFrame" value="/world" />
     <rosparam command="load" file="$(find crazyflie_controller)/config/crazyflie2.yaml" />
   </node>
